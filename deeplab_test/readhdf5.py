@@ -13,8 +13,10 @@ def readdata(path):
 
     h5f = h5py.File(path, "r")
 
-    matrix = h5f['data'][:]
-    return matrix
+    train = h5f['data'][:]
+    label = h5f['label'][:]
+
+    return train,label
 
 def train_data(matrix):
     # print(matrix.shape)

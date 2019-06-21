@@ -21,8 +21,7 @@
 #
 # # 如果不存在数据文件则下载，并且解压
 # cifar10.maybe_download_and_extract()
-from readdata import read,read_image
-from readhdf5 import train_data,label_data,readdata
+from readdata import walk_file
 import tensorflow as tf
 import numpy as np
 import time
@@ -42,16 +41,15 @@ import time
 #         weight_loss = tf.multiply(tf.nn.l2_loss(var), w1, name='weight_loss')
 #         tf.add_to_collection('losses', weight_loss)
 #     return var
-path = 'test1.h5'
-matrix = readdata(path)
-train_list = train_data(matrix)
-label_list =  label_data(matrix)
-max_steps = 3000
+path = './H5'
+train_list,label_list = walk_file(path)
+print(train_list.shape,label_list.shape)
+max_steps = 30
 batch_size = 1
 train_x1 = 384  #训练集矩阵第一维度
 train_x2 = 576  #训练集矩阵第二维度
-train_dim = 4  #训练集图片通道数
-label_y1 = 384  #标签矩阵第一维度
+train_dim = 16  #训练集图片通道数
+label_y1 = 384  #标签矩阵第一维度`
 label_y2 = 576  #标签矩阵第二维度
 label_dim = 1   #标签图片通道数
 
@@ -230,13 +228,14 @@ logits=model()
 
 
 def get_Batch(data, label, batch_size):
-    print(data.shape, label.shape)
-    input_queue = tf.train.slice_input_producer([data, label], num_epochs=1, shuffle=True, capacity=32 )
-    x_batch, y_batch = tf.train.batch(input_queue, batch_size=batch_size, num_threads=1, capacity=32, allow_smaller_final_batch=False)
-    print('x_batch',x_batch.shape)
-    print('y_batch',y_batch.shape)
-    return x_batch, y_batch
-image_batch,label_batch = get_Batch(train_list,label_list,batch_size)
+    with tf.device('/cpu:0'):
+        print(data.shape, label.shape)
+        input_queue = tf.train.slice_input_producer([data, label], num_epochs=None, shuffle=False)
+        x_batch, y_batch = tf.train.batch(input_queue, batch_size=batch_size, num_threads=1, capacity=128, allow_smaller_final_batch=False)
+        print('x_batch',x_batch.shape)
+        print('y_batch',y_batch.shape)
+        return x_batch, y_batch
+
 
 
 def loss(logits, labels):
@@ -249,13 +248,33 @@ def loss(logits, labels):
     cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
     tf.add_to_collection('losses', cross_entropy_mean)
     return tf.add_n(tf.get_collection('losses'), name='total_loss')
+def loss1(matrix1,matrix2):
+    matrix1 = tf.cast(matrix1, tf.float32)
+    matrix2 = tf.cast(matrix2, tf.float32)
+    print('matrix2',matrix2)
+    m1 = find_x(matrix1,1)
+    m2 = find_x(matrix2,1)
+
+    insec = find_x(matrix1+matrix2,2)
+
+    loss_value = insec/(m1+m2-insec)
+    out = 1-loss_value
+    cross_entropy_mean = tf.reduce_mean(out, name='cross_entropy')
+    tf.add_to_collection('losses', cross_entropy_mean)
+    # print("insec",insec)
+    return tf.add_n(tf.get_collection('losses'), name='total_loss')
+
+def find_x(matrix, target):
+    sum = np.sum(matrix == target)
+    sum = tf.cast(sum, tf.float32)
+    return sum
 
 
-loss = loss(logits, label_holder)
+loss2 = loss1(logits, label_holder)
 
-train_op = tf.train.AdamOptimizer(1e-3).minimize(loss)
+train_op = tf.train.AdamOptimizer(1e-3).minimize(loss2)
 # top_k_op = tf.nn.in_top_k(logits, tf.cast(label_holder, tf.int64), 1)
-
+image_batch,label_batch = get_Batch(train_list,label_list,batch_size)
 
 sess = tf.InteractiveSession()
 tf.global_variables_initializer().run()

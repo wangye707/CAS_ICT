@@ -7,6 +7,29 @@
 import os
 from PIL import Image
 import numpy as np
+from  readhdf5 import readdata
+path = './H5'
+
+def walk_file(path):
+    fatherLists = os.listdir(path)  # 主目录
+    train_list = []
+    label_list = []
+    for name in fatherLists:
+        # print(name)
+        file_path = path + '/' + name
+
+        train,label = readdata(file_path)
+        label = np.asarray(label).reshape(384,576,1)
+        # print(label.shape)
+        # print(train.shape)
+        train_list.append(train)
+        '''label为384*576，改为384*576*1'''
+        label_list.append(label)
+    train_list = np.asarray(train_list)
+    label_list = np.asarray(label_list)
+    return train_list,label_list
+
+
 
 
 def read(path):
@@ -103,9 +126,11 @@ def image_padding(data,dim):  #图片填充  data是输入的图片列表，列�
 
 
 if __name__ == '__main__':
-    datapath = r'train.txt'
-    trainpath = r'D:\code\python\DeepLab_v3\data\datasets\VOCdevkit\VOC2012\JPEGImages'
-    labelpath = r'D:\code\python\DeepLab_v3\data\datasets\VOCdevkit\VOC2012\SegmentationObject'
-    name_list = read(datapath)
-    train_list = read_image(path=trainpath,list_name=name_list,str = '.jpg',dim = 3)#(1464, 500, 500, 3)
-    label_list = read_image(path=labelpath,list_name=name_list,str = '.png',dim = 1 )#(1464, 500, 500, 1)
+    # datapath = r'train.txt'
+    # trainpath = r'D:\code\python\DeepLab_v3\data\datasets\VOCdevkit\VOC2012\JPEGImages'
+    # labelpath = r'D:\code\python\DeepLab_v3\data\datasets\VOCdevkit\VOC2012\SegmentationObject'
+    # name_list = read(datapath)
+    # train_list = read_image(path=trainpath,list_name=name_list,str = '.jpg',dim = 3)#(1464, 500, 500, 3)
+    # label_list = read_image(path=labelpath,list_name=name_list,str = '.png',dim = 1 )#(1464, 500, 500, 1)
+    path = './H5'
+    walk_file(path)
