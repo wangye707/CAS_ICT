@@ -44,6 +44,9 @@ import time
 path = './H5'
 train_list,label_list = walk_file(path)
 print(train_list.shape,label_list.shape)
+
+# print(train_list.shape[0])
+
 max_steps = 30
 batch_size = 1
 train_x1 = 384  #训练集矩阵第一维度
@@ -52,6 +55,23 @@ train_dim = 16  #训练集图片通道数
 label_y1 = 384  #标签矩阵第一维度`
 label_y2 = 576  #标签矩阵第二维度
 label_dim = 1   #标签图片通道数
+'''
+ValueError: Cannot create a tensor proto whose content is larger than 2GB.
+针对图片自已读入不能超过2G做出切分操作
+'''
+# train_new_list = train_list[0:3,0:train_x1,0:train_x2,None]
+# print(train_new_list.shape)
+temp_position = [0,6,12]
+train_data = []
+label_data = []
+for i in range(len(temp_position)-1):
+    # print(i)
+    train_new_list = train_list[temp_position[i]:temp_position[i+1],0:train_x1,0:train_x2,0:train_dim]
+    print(train_new_list.shape)
+    label_new_list = label_list[temp_position[i]:temp_position[i+1],0:label_y1,0:label_y2,0:label_dim]
+    train_data.append(train_new_list)
+    label_data.append(label_new_list)
+print(train_list.shape, label_list.shape)
 
 
 image_holder = tf.placeholder(tf.float32, [batch_size, train_x1, train_x2, train_dim])
@@ -229,52 +249,79 @@ logits=model()
 
 def get_Batch(data, label, batch_size):
     with tf.device('/cpu:0'):
-        print(data.shape, label.shape)
-        input_queue = tf.train.slice_input_producer([data, label], num_epochs=None, shuffle=False)
-        x_batch, y_batch = tf.train.batch(input_queue, batch_size=batch_size, num_threads=1, capacity=128, allow_smaller_final_batch=False)
-        print('x_batch',x_batch.shape)
-        print('y_batch',y_batch.shape)
-        return x_batch, y_batch
+        X_batch = []
+        Y_batch = []
+        for i in range(len(data)):
+            #print(data.shape, label.shape)
+            data_in = data[i]
+            label_in = label[i]
+            input_queue = tf.train.slice_input_producer([data_in, label_in], num_epochs=None, shuffle=False)
+            x_batch, y_batch = tf.train.batch(input_queue, batch_size=batch_size, num_threads=1, capacity=128, allow_smaller_final_batch=False)
+            print('x_batch',x_batch.shape)
+            print('y_batch',y_batch.shape)
+            X_batch.append(x_batch)
+            Y_batch.append(y_batch)
+        return X_batch, Y_batch
 
 
+# def loss(logits, labels):
+#     labels = tf.cast(labels, tf.float32)
+#     cross_entropy = logits - labels
+#     # tf.nn.sparse_softmax_cross_entropy_with_logits\
+#     # (logits=logits, labels=labels,
+#     #   # name='cross_entropy_per_example'
+#     #  )
+#     cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
+#     tf.add_to_collection('losses', cross_entropy_mean)
+#     return tf.add_n(tf.get_collection('losses'), name='total_loss')
+# def loss1(matrix1,matrix2):
+#     matrix1 = tf.cast(matrix1, tf.float32)
+#     matrix2 = tf.cast(matrix2, tf.float32)
+#     matrix1 = tf.summary(matrix1)
+#     print('matrix2',matrix2)
+#     m1 = find_x(matrix1,1)
+#     m2 = find_x(matrix2,1)
+#
+#     insec = find_x(matrix1+matrix2,2)
+#
+#     loss_value = insec/(m1+m2-insec)
+#     out = 1-loss_value
+#     cross_entropy_mean = tf.reduce_mean(out, name='cross_entropy')
+#     tf.add_to_collection('losses', cross_entropy_mean)
+#     # print("insec",insec)
+#     return tf.add_n(tf.get_collection('losses'), name='total_loss')
 
-def loss(logits, labels):
+# def find_x(matrix, target):
+#     sum = tf.reduce_max
+#     sum = np.sum(matrix == target)
+#     sum = tf.cast(sum, tf.float32)
+#     return sum
+
+def loss_wy(logits,labels):
     labels = tf.cast(labels, tf.float32)
     cross_entropy = logits - labels
-    # tf.nn.sparse_softmax_cross_entropy_with_logits\
-    # (logits=logits, labels=labels,
-    #   # name='cross_entropy_per_example'
-    #  )
-    cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-    tf.add_to_collection('losses', cross_entropy_mean)
-    return tf.add_n(tf.get_collection('losses'), name='total_loss')
-def loss1(matrix1,matrix2):
-    matrix1 = tf.cast(matrix1, tf.float32)
-    matrix2 = tf.cast(matrix2, tf.float32)
-    print('matrix2',matrix2)
-    m1 = find_x(matrix1,1)
-    m2 = find_x(matrix2,1)
+    return tf.reduce_sum(tf.abs(cross_entropy))
 
-    insec = find_x(matrix1+matrix2,2)
-
-    loss_value = insec/(m1+m2-insec)
-    out = 1-loss_value
-    cross_entropy_mean = tf.reduce_mean(out, name='cross_entropy')
-    tf.add_to_collection('losses', cross_entropy_mean)
-    # print("insec",insec)
-    return tf.add_n(tf.get_collection('losses'), name='total_loss')
-
-def find_x(matrix, target):
-    sum = np.sum(matrix == target)
-    sum = tf.cast(sum, tf.float32)
-    return sum
+def acc_wy(loss_wy,logits,labels):
+    labels = tf.cast(labels, tf.float32)
+    logit = tf.reduce_sum(logits)
+    label = tf.reduce_sum(labels)
+    both = tf.div(tf.subtract(tf.add(logit,label),loss_wy),2)  #并集
+    return tf.div(both,label)
 
 
-loss2 = loss1(logits, label_holder)
 
-train_op = tf.train.AdamOptimizer(1e-3).minimize(loss2)
+loss = loss_wy(logits, label_holder)
+
+train_op = tf.train.AdamOptimizer(1e-3).minimize(loss)
+acc = acc_wy(loss,logits, label_holder)
+
+
+
+
+
 # top_k_op = tf.nn.in_top_k(logits, tf.cast(label_holder, tf.int64), 1)
-image_batch,label_batch = get_Batch(train_list,label_list,batch_size)
+image_batch,label_batch = get_Batch(train_data,label_data,batch_size)
 
 sess = tf.InteractiveSession()
 tf.global_variables_initializer().run()
@@ -283,15 +330,16 @@ tf.train.start_queue_runners()
 for step in range(max_steps):
     start_time = time.time()
     # image_batch, label_batch = sess.run([images_train, labels_train])
-    date,label= sess.run([image_batch,label_batch])
-    _, loss_value = sess.run([train_op, loss], feed_dict={image_holder: date, label_holder: label})
-    duration = time.time() - start_time
-    if step % 10 == 0:
-        examples_per_sec = batch_size / duration
-        sec_per_batch = float(duration)
+    for i in range(len(temp_position)):
+        date,label= sess.run([image_batch[i],label_batch[i]])
+        _, loss_value = sess.run([train_op, loss], feed_dict={image_holder: date, label_holder: label})
+        duration = time.time() - start_time
+        if step % 10 == 0:
+            examples_per_sec = batch_size / duration
+            sec_per_batch = float(duration)
 
-        format_str = ('step %d,loss=%.2f (%.1f examples/sec;%.3f sec/batch)')
-        print(format_str % (step, loss_value, examples_per_sec, sec_per_batch))
+            format_str = ('step %d,loss=%.2f (%.1f examples/sec;%.3f sec/batch)')
+            print(format_str % (step, loss_value, examples_per_sec, sec_per_batch))
 #
 # num_examples = 10000
 # import math

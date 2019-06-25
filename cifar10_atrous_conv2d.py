@@ -108,7 +108,6 @@ weight5 = variable_with_weight_loss([192, 10], stddev=1 / 192, w1=0.0)
 bias5 = tf.Variable(tf.constant(0.0, shape=[10]))
 logits = tf.matmul(local4, weight5) + bias5
 
-
 def loss(logits, labels):
     labels = tf.cast(labels, tf.int64)
     cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels,
