@@ -21,7 +21,7 @@
 #
 # # 如果不存在数据文件则下载，并且解压
 # cifar10.maybe_download_and_extract()
-#from loss_function import loss1
+import cifar10,cifar10_input
 from readdata import walk_file
 import tensorflow as tf
 import numpy as np
@@ -42,35 +42,34 @@ import time
 #         weight_loss = tf.multiply(tf.nn.l2_loss(var), w1, name='weight_loss')
 #         tf.add_to_collection('losses', weight_loss)
 #     return var
+path = './cifar-10-batches-bin'
+# train_list,label_list = walk_file(path)
+# print(train_list.shape,label_list.shape)
 
-path = '/root/hdf5/h5output/'
-train_list,label_list = walk_file(path)
-#train_list = tf.random_normal([40,384,576,3],stddev=1.0,dtype=tf.float32,seed=None,name=None)
-#label_list = tf.random_normal([40,384,576,1],stddev=1.0,dtype=tf.float32,seed=None,name=None)
-print(train_list.shape,label_list.shape)
+# print(train_list.shape[0])
 
 max_steps = 3000
-batch_size = 2
-train_x1 = 384  #训练集矩阵第一维度
-train_x2 = 576  #训练集矩阵第二维度
-train_dim = 16  #训练集图片通道数
-label_y1 = 384  #标签矩阵第一维度
-label_y2 = 576  #标签矩阵第二维度
-label_dim = 1   #标签图片通道数
-temp_position = [0,100,200,300,400,420]
-train_data = []
-label_data = []
-for i in range(len(temp_position)-1):
-    # print(i)
-    train_new_list = train_list[temp_position[i]:temp_position[i+1],0:train_x1,0:train_x2,0:train_dim]
-    print(train_new_list.shape)
-    label_new_list = label_list[temp_position[i]:temp_position[i+1],0:label_y1,0:label_y2,0:label_dim]
-    train_data.append(train_new_list)
-    label_data.append(label_new_list)
+batch_size = 50
+data_dir = r'./cifar10_data/cifar-10-batches-bin'
 
 
-image_holder = tf.placeholder(tf.float32, [batch_size, train_x1, train_x2, train_dim])
-label_holder = tf.placeholder(tf.float32, [batch_size, label_y1, label_y2, label_dim])
+def variable_with_weight_loss(shape, stddev, w1):
+    var = tf.Variable(tf.truncated_normal(shape, stddev=stddev))
+    if w1 is not None:
+        weight_loss = tf.multiply(tf.nn.l2_loss(var), w1, name='weight_loss')
+        tf.add_to_collection('losses', weight_loss)
+    return var
+
+
+images_train, labels_train = cifar10_input.distorted_inputs(data_dir=data_dir, batch_size=batch_size)
+
+images_test, labels_test = cifar10_input.inputs(eval_data=True,
+                                                data_dir=data_dir,
+                                                batch_size=batch_size)
+
+
+image_holder = tf.placeholder(tf.float32, [batch_size, 24, 24, 3])
+label_holder = tf.placeholder(tf.float32, [batch_size])
 
 def tf_conv(inputs,filters,kernel_size,
             strides=1,stddev=0.01,padding = 'SAME'):  #卷积层
@@ -204,7 +203,7 @@ def model():
     for i in range(3):
         conv = tf_conv(inputs=conv, filters=512, kernel_size=[1, 1])
         atr_conv = tf_atrous_conv(inputs=conv, filters=512,kernel_size=[3,3], rate=4)
-        conv = tf_conv(inputs=atr_conv, filters=1024, kernel_size=[1, 1])
+        conv = tf_conv(inputs=atr_conv, filters=2048, kernel_size=[1, 1])
     print("5",conv)
     #第五维度，ASPP层
     ASPP = atrous_spatial_pyramid_pooling(conv,filters=256)
@@ -232,65 +231,88 @@ def model():
     print('7',resnet_conv)
     #第八维度
     conv = tf_conv(inputs=resnet_conv,filters=256,kernel_size=[3,3])
-    conv = tf_conv(inputs=conv,filters=128,kernel_size=[3,3])
-    conv = tf_conv(inputs=conv,filters=1,kernel_size=[1,1])
+    conv = tf_conv(inputs=conv,filters=256,kernel_size=[3,3])
+    conv = tf_conv(inputs=conv,filters=3,kernel_size=[1,1])
     print('8',conv)
-    out = conv  #全部归一化处理
+    # 全链接
+    reshape = tf.reshape(conv, [batch_size, -1])  # 分开成为
+    dim = reshape.get_shape()[1].value  #
+    weight3 = variable_with_weight_loss([dim, 384], stddev=0.04, w1=0.004)
+    bias3 = tf.Variable(tf.constant(0.1, shape=[384]))
+    local3 = tf.nn.relu(tf.matmul(reshape, weight3) + bias3)
+    # 全连接层
+    weight4 = variable_with_weight_loss([384, 192], stddev=0.04, w1=0.004)
+    bias4 = tf.Variable(tf.constant(0.1, shape=[192]))
+    local4 = tf.nn.relu(tf.matmul(local3, weight4) + bias4)
+    # 输出层
+    weight5 = variable_with_weight_loss([192, 10], stddev=1 / 192, w1=0.0)
+    bias5 = tf.Variable(tf.constant(0.0, shape=[10]))
+    logits = tf.matmul(local4, weight5) + bias5
+
+    out = logits
     return out
 
 
 logits=model()
 
 
-def get_Batch(data, label, batch_size):
-    with tf.device('/cpu:0'):
-        X_batch = []
-        Y_batch = []
-        for i in range(len(data)):
-            #print(data.shape, label.shape)
-            data_in = data[i]
-            label_in = label[i]
-            input_queue = tf.train.slice_input_producer([data_in, label_in], num_epochs=None, shuffle=True)
-            x_batch, y_batch = tf.train.batch(input_queue, batch_size=batch_size, num_threads=1, capacity=128, allow_smaller_final_batch=False)
-            print('x_batch',x_batch.shape)
-            print('y_batch',y_batch.shape)
-            X_batch.append(x_batch)
-            Y_batch.append(y_batch)
-        return X_batch, Y_batch
-
-def loss_wy(logits,labels):
-    labels = tf.cast(labels, tf.float32)
-    cross_entropy = tf.subtract(logits,labels)
-    return tf.reduce_sum(tf.abs(cross_entropy))
-    # return tf.reduce_sum(tf.abs(tf.subtract(logits,labels)))
-    # a = tf.bincount()
-    # return tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=labels))
-    # return tf.reduce_sum(tf.subtract(logits,labels))
-# def wy2_acc(logits,labels):
-#     l
-def loss_initializer(logits,labels):
-
-    labels_linear = tf.reshape(labels, shape=[-1])
-    not_ignore_mask = tf.to_float(tf.not_equal(labels_linear,ignore_label))
-    # The locations represented by indices in indices take value on_value, while all other locations take value off_value.
-    # For example, ignore label 255 in VOC2012 dataset will be set to zero vector in onehot encoding (looks like the not ignore mask is not required)
-    onehot_labels = tf.one_hot(indices=labels_linear, depth=self.num_classes, on_value=1.0, off_value=0.0)
-
-    loss = tf.losses.softmax_cross_entropy(onehot_labels=onehot_labels, logits=tf.reshape(self.outputs, shape=[-1, self.num_classes]), weights=not_ignore_mask)
-
-    return loss
+# def get_Batch(data, label, batch_size):
+#     with tf.device('/cpu:0'):
+#         X_batch = []
+#         Y_batch = []
+#         for i in range(len(data)):
+#             #print(data.shape, label.shape)
+#             data_in = data[i]
+#             label_in = label[i]
+#             input_queue = tf.train.slice_input_producer([data_in, label_in], num_epochs=None, shuffle=False)
+#             x_batch, y_batch = tf.train.batch(input_queue, batch_size=batch_size, num_threads=1, capacity=128, allow_smaller_final_batch=False)
+#             print('x_batch',x_batch.shape)
+#             print('y_batch',y_batch.shape)
+#             X_batch.append(x_batch)
+#             Y_batch.append(y_batch)
+#         return X_batch, Y_batch
 
 
-#def loss(logits, labels):
-#    labels = tf.cast(labels, tf.float32)
-#    cross_entropy = logits - labels
-#    # tf.nn.sparse_softmax_cross_entropy_with_logits\
-#    # (logits=logits, labels=labels,
-    #   # name='cross_entropy_per_example'
-    #  )
-#    cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-#    tf.add_to_collection('losses', cross_entropy_mean)
-#    return tf.add_n(tf.get_collection('losses'), name='total_loss')
+# def loss(logits, labels):
+#     labels = tf.cast(labels, tf.float32)
+#     cross_entropy = logits - labels
+#     # tf.nn.sparse_softmax_cross_entropy_with_logits\
+#     # (logits=logits, labels=labels,
+#     #   # name='cross_entropy_per_example'
+#     #  )
+#     cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
+#     tf.add_to_collection('losses', cross_entropy_mean)
+#     return tf.add_n(tf.get_collection('losses'), name='total_loss')
+# def loss1(matrix1,matrix2):
+#     matrix1 = tf.cast(matrix1, tf.float32)
+#     matrix2 = tf.cast(matrix2, tf.float32)
+#     matrix1 = tf.summary(matrix1)
+#     print('matrix2',matrix2)
+#     m1 = find_x(matrix1,1)
+#     m2 = find_x(matrix2,1)
+#
+#     insec = find_x(matrix1+matrix2,2)
+#
+#     loss_value = insec/(m1+m2-insec)
+#     out = 1-loss_value
+#     cross_entropy_mean = tf.reduce_mean(out, name='cross_entropy')
+#     tf.add_to_collection('losses', cross_entropy_mean)
+#     # print("insec",insec)
+#     return tf.add_n(tf.get_collection('losses'), name='total_loss')
+
+# def find_x(matrix, target):
+#     sum = tf.reduce_max
+#     sum = np.sum(matrix == target)
+#     sum = tf.cast(sum, tf.float32)
+#     return sum
+def loss_wy(logits, labels):
+    labels = tf.cast(labels, tf.int64)
+    cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels,
+                                                                   name='cross_entropy_per_example')
+    cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
+    tf.add_to_collection('losses', cross_entropy_mean)
+    return tf.add_n(tf.get_collection('losses'), name='total_loss')
+
 def acc_wy(loss_wy,logits,labels):
     labels = tf.cast(labels, tf.float32)
     logit = tf.reduce_sum(logits)
@@ -298,59 +320,35 @@ def acc_wy(loss_wy,logits,labels):
     both = tf.div(tf.subtract(tf.add(logit,label),loss_wy),2)  #并集
     return tf.div(both,label)
 
-def position(logits,labels):
-    return tf.reduce_sum(logits),tf.reduce_sum(labels)
-    # return tf.metrics.mean_iou(labels,logits,num_classes=1)[1]
+
+
 loss = loss_wy(logits, label_holder)
 
-train_op = tf.train.AdamOptimizer(0.00000001).minimize(loss)
+train_op = tf.train.AdamOptimizer(1e-3).minimize(loss)
+acc = acc_wy(loss,logits, label_holder)
 
 
-accuary = acc_wy(loss,logits, label_holder)
-pre,lab = position(logits, label_holder)
-#top_k_op = tf.nn.in_top_k(logits, tf.cast(label_holder, tf.int64), 1)
-image_batch,label_batch = get_Batch(train_data,label_data,batch_size)
+
+
+
+# top_k_op = tf.nn.in_top_k(logits, tf.cast(label_holder, tf.int64), 1)
+# image_batch,label_batch = get_Batch(train_data,label_data,batch_size)
 
 sess = tf.InteractiveSession()
 tf.global_variables_initializer().run()
 sess.run(tf.local_variables_initializer())
-coord = tf.train.Coordinator()
-tf.train.start_queue_runners(coord = coord)
+tf.train.start_queue_runners()
 for step in range(max_steps):
-    loss_avg = []
-    examples_per_sec_avg = []
-    sec_per_batch_avg = []
-    lab_list =[]
-    pre_list = []
     start_time = time.time()
-    for i in range(len(temp_position)-1):
-    # image_batch, label_batch = sess.run([images_train, labels_train])
-        date,label= sess.run([image_batch[i],label_batch[i]])
-        acc,_, loss_value,pre1,lab1 = sess.run([accuary,train_op, loss,pre,lab], feed_dict={image_holder: date, label_holder: label})
-        duration = time.time() - start_time
-        if step % 1 == 0:
-            examples_per_sec = batch_size / duration
-            sec_per_batch = float(duration)
-            # print("acc",acc)
-            # print("step:",step,'loss:',loss_value)
-            # for i in range(5):
-            # print(loss_value)
-            loss_avg.append(loss_value)
-            examples_per_sec_avg.append(examples_per_sec)
-            sec_per_batch_avg.append(sec_per_batch)
-            pre_list.append(pre1)
-            lab_list.append(lab1)
-            # lab.append()
-            if len(loss_avg) == len(temp_position)-1:   #将step = 10的loss求平均，因为之前处理过batch
-                loss_out = (sum(loss_avg)/len(temp_position))
-                examples_per_sec_out = (sum(examples_per_sec_avg)/len(temp_position))
-                sec_per_batch_out = (sum(sec_per_batch_avg)/len(temp_position))
-                pre_out = (sum(pre_list)/len(temp_position))
-                lab_out = (sum(lab_list)/len(temp_position))
-                format_str = ('step %d,acc=%d,loss=%.2f,pre %d,lab %d,(%.1f examples/sec;%.3f sec/batch)')
-                print(format_str % (step,acc,loss_out,pre_out,lab_out,examples_per_sec_out,sec_per_batch_out))
-builder = tf.saved_model.builder.SavedModelBuilder("./fuck")
+    image_batch, label_batch = sess.run([images_train, labels_train])
+    _, loss_value = sess.run([train_op, loss], feed_dict={image_holder: image_batch, label_holder: label_batch})
+    duration = time.time() - start_time
+    if step % 10 == 0:
+        examples_per_sec = batch_size / duration
+        sec_per_batch = float(duration)
 
+        format_str = ('step %d,loss=%.2f (%.1f examples/sec;%.3f sec/batch)')
+        print(format_str % (step, loss_value, examples_per_sec, sec_per_batch))
 #
 # num_examples = 10000
 # import math

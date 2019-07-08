@@ -26,51 +26,26 @@ from readdata import walk_file
 import tensorflow as tf
 import numpy as np
 import time
+import os
 
 #cifar10.maybe_download_and_extract()
 
-# datapath = r'train.txt'
-# trainpath = r'D:\code\python\DeepLab_v3\data\datasets\VOCdevkit\VOC2012\JPEGImages'
-# labelpath = r'D:\code\python\DeepLab_v3\data\datasets\VOCdevkit\VOC2012\SegmentationObject'
-# name_list = read(datapath)
-# train_list = read_image(path=trainpath, list_name=name_list, str='.jpg', dim=3)  # (1464, 500, 500, 3)
-# label_list = read_image(path=labelpath, list_name=name_list, str='.png', dim=1)  # (1464, 500, 500, 1)
-
-# def variable_with_weight_loss(shape, stddev, w1):
-#     var = tf.Variable(tf.truncated_normal(shape, stddev=stddev))
-#     if w1 is not None:
-#         weight_loss = tf.multiply(tf.nn.l2_loss(var), w1, name='weight_loss')
-#         tf.add_to_collection('losses', weight_loss)
-#     return var
-
-path = '/root/hdf5/h5output/'
-train_list,label_list = walk_file(path)
-#train_list = tf.random_normal([40,384,576,3],stddev=1.0,dtype=tf.float32,seed=None,name=None)
-#label_list = tf.random_normal([40,384,576,1],stddev=1.0,dtype=tf.float32,seed=None,name=None)
-print(train_list.shape,label_list.shape)
-
-max_steps = 3000
-batch_size = 2
-train_x1 = 384  #训练集矩阵第一维度
-train_x2 = 576  #训练集矩阵第二维度
-train_dim = 16  #训练集图片通道数
-label_y1 = 384  #标签矩阵第一维度
-label_y2 = 576  #标签矩阵第二维度
-label_dim = 1   #标签图片通道数
-temp_position = [0,100,200,300,400,420]
-train_data = []
-label_data = []
-for i in range(len(temp_position)-1):
-    # print(i)
-    train_new_list = train_list[temp_position[i]:temp_position[i+1],0:train_x1,0:train_x2,0:train_dim]
-    print(train_new_list.shape)
-    label_new_list = label_list[temp_position[i]:temp_position[i+1],0:label_y1,0:label_y2,0:label_dim]
-    train_data.append(train_new_list)
-    label_data.append(label_new_list)
+FLAGS = tf.app.flags.FLAGS
+tf.app.flags.DEFINE_string("ps_hosts","10.18.96.13:8022",
+                           "Comma-separated list of hostname:port pairs")
+tf.app.flags.DEFINE_string("worker_hosts", "10.18.96.4:8022",
+                           "Comma-separated list of hostname:port pairs")
+tf.app.flags.DEFINE_string("job_name", "", "One of 'ps', 'worker'")
+tf.app.flags.DEFINE_integer("task_index", 0, "Index of task within the job")
+tf.app.flags.DEFINE_integer("issync", 0, "是否采用分布式的同步模式，1表示同步模式，0表示异步模式")
+tf.app.flags.DEFINE_string("cuda", "", "specify gpu")
+if FLAGS.cuda:
+    os.environ["CUDA_VISIBLE_DEVICES"] = FLAGS.cuda
 
 
-image_holder = tf.placeholder(tf.float32, [batch_size, train_x1, train_x2, train_dim])
-label_holder = tf.placeholder(tf.float32, [batch_size, label_y1, label_y2, label_dim])
+
+
+
 
 def tf_conv(inputs,filters,kernel_size,
             strides=1,stddev=0.01,padding = 'SAME'):  #卷积层
@@ -174,7 +149,7 @@ def atrous_spatial_pyramid_pooling(inputs, filters=256, regularizer=None):  #ASP
     return outputs
 
 
-def model():
+def model(image_holder):
 
     #第一堆
     resnet2 = tf_conv(inputs=image_holder,filters=64,strides=1,kernel_size = [3,3])
@@ -238,10 +213,6 @@ def model():
     out = conv  #全部归一化处理
     return out
 
-
-logits=model()
-
-
 def get_Batch(data, label, batch_size):
     with tf.device('/cpu:0'):
         X_batch = []
@@ -262,35 +233,7 @@ def loss_wy(logits,labels):
     labels = tf.cast(labels, tf.float32)
     cross_entropy = tf.subtract(logits,labels)
     return tf.reduce_sum(tf.abs(cross_entropy))
-    # return tf.reduce_sum(tf.abs(tf.subtract(logits,labels)))
-    # a = tf.bincount()
-    # return tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=labels))
-    # return tf.reduce_sum(tf.subtract(logits,labels))
-# def wy2_acc(logits,labels):
-#     l
-def loss_initializer(logits,labels):
 
-    labels_linear = tf.reshape(labels, shape=[-1])
-    not_ignore_mask = tf.to_float(tf.not_equal(labels_linear,ignore_label))
-    # The locations represented by indices in indices take value on_value, while all other locations take value off_value.
-    # For example, ignore label 255 in VOC2012 dataset will be set to zero vector in onehot encoding (looks like the not ignore mask is not required)
-    onehot_labels = tf.one_hot(indices=labels_linear, depth=self.num_classes, on_value=1.0, off_value=0.0)
-
-    loss = tf.losses.softmax_cross_entropy(onehot_labels=onehot_labels, logits=tf.reshape(self.outputs, shape=[-1, self.num_classes]), weights=not_ignore_mask)
-
-    return loss
-
-
-#def loss(logits, labels):
-#    labels = tf.cast(labels, tf.float32)
-#    cross_entropy = logits - labels
-#    # tf.nn.sparse_softmax_cross_entropy_with_logits\
-#    # (logits=logits, labels=labels,
-    #   # name='cross_entropy_per_example'
-    #  )
-#    cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-#    tf.add_to_collection('losses', cross_entropy_mean)
-#    return tf.add_n(tf.get_collection('losses'), name='total_loss')
 def acc_wy(loss_wy,logits,labels):
     labels = tf.cast(labels, tf.float32)
     logit = tf.reduce_sum(logits)
@@ -301,73 +244,139 @@ def acc_wy(loss_wy,logits,labels):
 def position(logits,labels):
     return tf.reduce_sum(logits),tf.reduce_sum(labels)
     # return tf.metrics.mean_iou(labels,logits,num_classes=1)[1]
-loss = loss_wy(logits, label_holder)
-
-train_op = tf.train.AdamOptimizer(0.00000001).minimize(loss)
 
 
-accuary = acc_wy(loss,logits, label_holder)
-pre,lab = position(logits, label_holder)
-#top_k_op = tf.nn.in_top_k(logits, tf.cast(label_holder, tf.int64), 1)
-image_batch,label_batch = get_Batch(train_data,label_data,batch_size)
+def main(_):
+    """"
+    分布式处理模型1
+    """
+    ps_hosts = FLAGS.ps_hosts.split(",")
+    worker_hosts = FLAGS.worker_hosts.split(",")
+    cluster = tf.train.ClusterSpec({"ps": ps_hosts, "worker": worker_hosts})
+    server = tf.train.Server(cluster, job_name=FLAGS.job_name, task_index=FLAGS.task_index)
+    issync = FLAGS.issync
+    if FLAGS.job_name == "ps":
+        server.join()
 
-sess = tf.InteractiveSession()
-tf.global_variables_initializer().run()
-sess.run(tf.local_variables_initializer())
-coord = tf.train.Coordinator()
-tf.train.start_queue_runners(coord = coord)
-for step in range(max_steps):
-    loss_avg = []
-    examples_per_sec_avg = []
-    sec_per_batch_avg = []
-    lab_list =[]
-    pre_list = []
-    start_time = time.time()
-    for i in range(len(temp_position)-1):
-    # image_batch, label_batch = sess.run([images_train, labels_train])
-        date,label= sess.run([image_batch[i],label_batch[i]])
-        acc,_, loss_value,pre1,lab1 = sess.run([accuary,train_op, loss,pre,lab], feed_dict={image_holder: date, label_holder: label})
-        duration = time.time() - start_time
-        if step % 1 == 0:
-            examples_per_sec = batch_size / duration
-            sec_per_batch = float(duration)
-            # print("acc",acc)
-            # print("step:",step,'loss:',loss_value)
-            # for i in range(5):
-            # print(loss_value)
-            loss_avg.append(loss_value)
-            examples_per_sec_avg.append(examples_per_sec)
-            sec_per_batch_avg.append(sec_per_batch)
-            pre_list.append(pre1)
-            lab_list.append(lab1)
-            # lab.append()
-            if len(loss_avg) == len(temp_position)-1:   #将step = 10的loss求平均，因为之前处理过batch
-                loss_out = (sum(loss_avg)/len(temp_position))
-                examples_per_sec_out = (sum(examples_per_sec_avg)/len(temp_position))
-                sec_per_batch_out = (sum(sec_per_batch_avg)/len(temp_position))
-                pre_out = (sum(pre_list)/len(temp_position))
-                lab_out = (sum(lab_list)/len(temp_position))
-                format_str = ('step %d,acc=%d,loss=%.2f,pre %d,lab %d,(%.1f examples/sec;%.3f sec/batch)')
-                print(format_str % (step,acc,loss_out,pre_out,lab_out,examples_per_sec_out,sec_per_batch_out))
-builder = tf.saved_model.builder.SavedModelBuilder("./fuck")
+    elif FLAGS.job_name == "worker":
 
-#
-# num_examples = 10000
-# import math
-#
-# num_iter = int(math.ceil(num_examples / batch_size))
-# true_count = 0
-# total_sample_count = num_iter * batch_size
-# step = 0
-# # with tf.Session() as sess:
-# while step < num_iter:
-#     image_batch, label_batch = sess.run([images_test, labels_test])
-#     predictions = sess.run([top_k_op], feed_dict={image_holder: image_batch,
-#                                                   label_holder: label_batch})
-#     true_count += np.sum(predictions)
-#     step += 1
-#     if step % 10 == 0:
-#         print(true_count)
-#
-# precision = float(true_count) / total_sample_count
-# print('precision @ 1 =%.3f' % precision)
+        with tf.device(tf.train.replica_device_setter(
+                worker_device="/job:worker/task:%d" % FLAGS.task_index,
+                cluster=cluster)):
+            path = '/root/hdf5/h5output/'
+            train_list, label_list = walk_file(path)
+            # train_list = tf.random_normal([40,384,576,3],stddev=1.0,dtype=tf.float32,seed=None,name=None)
+            # label_list = tf.random_normal([40,384,576,1],stddev=1.0,dtype=tf.float32,seed=None,name=None)
+            print(train_list.shape, label_list.shape)
+
+            max_steps = 3000
+            batch_size = 1
+            train_x1 = 384  # 训练集矩阵第一维度
+            train_x2 = 576  # 训练集矩阵第二维度
+            train_dim = 16  # 训练集图片通道数
+            label_y1 = 384  # 标签矩阵第一维度
+            label_y2 = 576  # 标签矩阵第二维度
+            label_dim = 1  # 标签图片通道数
+            temp_position = [0, 100, 200, 300, 400, 420]
+            train_data = []
+            label_data = []
+            for i in range(len(temp_position) - 1):
+                # print(i)
+                train_new_list = train_list[temp_position[i]:temp_position[i + 1], 0:train_x1, 0:train_x2, 0:train_dim]
+                print(train_new_list.shape)
+                label_new_list = label_list[temp_position[i]:temp_position[i + 1], 0:label_y1, 0:label_y2, 0:label_dim]
+                train_data.append(train_new_list)
+                label_data.append(label_new_list)
+            global_step = tf.Variable(0, name='global_step', trainable=False)
+
+            image_holder = tf.placeholder(tf.float32, [batch_size, train_x1, train_x2, train_dim])
+            label_holder = tf.placeholder(tf.float32, [batch_size, label_y1, label_y2, label_dim])
+            logits = model(image_holder)
+
+            loss = loss_wy(logits, label_holder)
+            optimizer = tf.train.GradientDescentOptimizer(0.001)
+            grads_and_vars = optimizer.compute_gradients(loss)
+
+
+            accuary = acc_wy(loss,logits, label_holder)
+            pre,lab = position(logits, label_holder)
+            #top_k_op = tf.nn.in_top_k(logits, tf.cast(label_holder, tf.int64), 1)
+            image_batch,label_batch = get_Batch(train_data,label_data,batch_size)
+
+            if issync == 1:
+                # 同步模式计算更新梯度
+                rep_op = tf.train.SyncReplicasOptimizer(optimizer,
+                                                        replicas_to_aggregate=len(
+                                                            worker_hosts),
+                                                        #                     replica_id=FLAGS.task_index,
+                                                        total_num_replicas=len(
+                                                            worker_hosts),
+                                                        use_locking=True)
+                train_op = rep_op.apply_gradients(grads_and_vars,
+                                                  global_step=global_step)
+                init_token_op = rep_op.get_init_tokens_op()
+                chief_queue_runner = rep_op.get_chief_queue_runner()
+            else:
+                # 异步模式计算更新梯度
+                train_op = optimizer.apply_gradients(grads_and_vars,
+                                                     global_step=global_step)
+
+            init_op = tf.initialize_all_variables()
+
+            # saver = tf.train.Saver()
+            # tf.summary.scalar('cost', loss_value)
+            # summary_op = tf.summary.merge_all()
+
+        sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
+                                 #  logdir="./checkpoint/",
+                                 init_op=init_op,
+                                 summary_op=None,
+                                 #  saver=saver,
+                                 global_step=global_step,
+                                 # save_model_secs=60
+                                 )
+        with sv.prepare_or_wait_for_session(server.target) as sess:
+            # 如果是同步模式
+            if FLAGS.task_index == 0 and issync == 1:
+                sv.start_queue_runners(sess, [chief_queue_runner])
+                sess.run(init_token_op)
+
+
+            #
+            # sess = tf.InteractiveSession()
+            # tf.global_variables_initializer().run()
+            # sess.run(tf.local_variables_initializer())
+            # coord = tf.train.Coordinator()
+            # tf.train.start_queue_runners(coord = coord)
+            for step in range(max_steps):
+                loss_avg = []
+                examples_per_sec_avg = []
+                sec_per_batch_avg = []
+                lab_list =[]
+                pre_list = []
+                start_time = time.time()
+                for i in range(len(temp_position)-1):
+                # image_batch, label_batch = sess.run([images_train, labels_train])
+                    date,label= sess.run([image_batch[i],label_batch[i]])
+                    acc,_, loss_value,pre1,lab1 = sess.run([accuary,train_op, loss,pre,lab], feed_dict={image_holder: date, label_holder: label})
+                    duration = time.time() - start_time
+                    if step % 1 == 0:
+                        examples_per_sec = batch_size / duration
+                        sec_per_batch = float(duration)
+                        loss_avg.append(loss_value)
+                        examples_per_sec_avg.append(examples_per_sec)
+                        sec_per_batch_avg.append(sec_per_batch)
+                        pre_list.append(pre1)
+                        lab_list.append(lab1)
+                        if len(loss_avg) == len(temp_position)-1:   #将step = 10的loss求平均，因为之前处理过batch
+                            loss_out = (sum(loss_avg)/len(temp_position))
+                            examples_per_sec_out = (sum(examples_per_sec_avg)/len(temp_position))
+                            sec_per_batch_out = (sum(sec_per_batch_avg)/len(temp_position))
+                            pre_out = (sum(pre_list)/len(temp_position))
+                            lab_out = (sum(lab_list)/len(temp_position))
+                            format_str = ('step %d,acc=%d,loss=%.2f,pre %d,lab %d,(%.1f examples/sec;%.3f sec/batch)')
+                            print(format_str % (step,acc,loss_out,pre_out,lab_out,examples_per_sec_out,sec_per_batch_out))
+
+if __name__ == '__main__':
+    tf.app.run()
+    # ma()
