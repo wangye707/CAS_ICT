@@ -235,7 +235,9 @@ def model():
     conv = tf_conv(inputs=conv,filters=128,kernel_size=[3,3])
     conv = tf_conv(inputs=conv,filters=1,kernel_size=[1,1])
     print('8',conv)
-    out = conv  #全部归一化处理
+    #out = conv
+    out = tf.sigmoid(conv)  #全部归一化处理
+
     return out
 
 
@@ -259,6 +261,7 @@ def get_Batch(data, label, batch_size):
         return X_batch, Y_batch
 
 def loss_wy(logits,labels):
+
     labels = tf.cast(labels, tf.float32)
     cross_entropy = tf.subtract(logits,labels)
     return tf.reduce_sum(tf.abs(cross_entropy))
@@ -281,6 +284,29 @@ def loss_initializer(logits,labels):
     return loss
 
 
+# def focal_loss(predictions,labels,alpha,gamma):
+#     zeros = tf.zeros_like(predictions,dtype=predictions.dtype)
+#     pos_corr = tf.where(labels > zeros,labels - predictions , zeros)
+#     neg_corr = tf.where(labels >zeros, zeros, predictions)
+#     fl_loss = - alpha * (pos_corr**gamma)*tf.log(predictions) -\
+#               (1-alpha)*(neg_corr**gamma)*tf.log(1.0 - predictions)
+#     return tf.reduce_sum(fl_loss)
+
+
+def focal_loss(y_true, y_pred):
+
+    gamma = 0.89
+    alpha = 0.11
+    y_pred1  = tf.abs(y_pred)
+    pt_1 = tf.where(tf.equal(y_true, 1), y_pred1, tf.ones_like(y_pred))
+    pt_0 = tf.where(tf.equal(y_true, 0), y_pred1, tf.zeros_like(y_pred))
+
+    # pt_1 = tf.clip(pt_1, 1e-3, .999)
+    # pt_0 = K.clip(pt_0, 1e-3, .999)
+    print(pt_0)
+    return -tf.reduce_sum(alpha * tf.pow(1. - pt_1, gamma) * tf.log(pt_1)) - tf.reduce_sum(
+        (1 - alpha) * tf.pow(pt_0, gamma) * tf.log(1. - pt_0))
+    
 #def loss(logits, labels):
 #    labels = tf.cast(labels, tf.float32)
 #    cross_entropy = logits - labels
@@ -301,9 +327,13 @@ def acc_wy(loss_wy,logits,labels):
 def position(logits,labels):
     return tf.reduce_sum(logits),tf.reduce_sum(labels)
     # return tf.metrics.mean_iou(labels,logits,num_classes=1)[1]
-loss = loss_wy(logits, label_holder)
+loss = focal_loss(
+                label_holder,logits
+                # logits,label_holder,
+               # ,alpha=0.25,gamma=2
+               )
 
-train_op = tf.train.AdamOptimizer(0.00000001).minimize(loss)
+train_op = tf.train.AdamOptimizer(0.00001).minimize(loss)
 
 
 accuary = acc_wy(loss,logits, label_holder)
@@ -333,23 +363,24 @@ for step in range(max_steps):
             sec_per_batch = float(duration)
             # print("acc",acc)
             # print("step:",step,'loss:',loss_value)
-            # for i in range(5):
+            for i in range(5):   #按切分去显示，就是因OOM的问题的处理方式
             # print(loss_value)
-            loss_avg.append(loss_value)
-            examples_per_sec_avg.append(examples_per_sec)
-            sec_per_batch_avg.append(sec_per_batch)
-            pre_list.append(pre1)
-            lab_list.append(lab1)
-            # lab.append()
-            if len(loss_avg) == len(temp_position)-1:   #将step = 10的loss求平均，因为之前处理过batch
-                loss_out = (sum(loss_avg)/len(temp_position))
-                examples_per_sec_out = (sum(examples_per_sec_avg)/len(temp_position))
-                sec_per_batch_out = (sum(sec_per_batch_avg)/len(temp_position))
-                pre_out = (sum(pre_list)/len(temp_position))
-                lab_out = (sum(lab_list)/len(temp_position))
-                format_str = ('step %d,acc=%d,loss=%.2f,pre %d,lab %d,(%.1f examples/sec;%.3f sec/batch)')
-                print(format_str % (step,acc,loss_out,pre_out,lab_out,examples_per_sec_out,sec_per_batch_out))
-builder = tf.saved_model.builder.SavedModelBuilder("./fuck")
+                loss_avg.append(loss_value)
+                examples_per_sec_avg.append(examples_per_sec)
+                sec_per_batch_avg.append(sec_per_batch)
+                pre_list.append(pre1)
+                lab_list.append(lab1)
+                # lab.append()
+                if len(loss_avg) == len(temp_position)-1:   #将step = 10的loss求平均，因为之前处理过batch
+                    loss_out = (sum(loss_avg)/len(temp_position))
+                    examples_per_sec_out = (sum(examples_per_sec_avg)/len(temp_position))
+                    sec_per_batch_out = (sum(sec_per_batch_avg)/len(temp_position))
+                    pre_out = (sum(pre_list)/len(temp_position))#预测的目标和
+                    lab_out = (sum(lab_list)/len(temp_position))#标签中的目标和
+                    print('step',step,'acc',acc,'loss',loss_out,'pre_out',pre_out,'lab_out',lab_out)
+                    # format_str = ('step %d,acc=%d,loss=%.2f,pre %d,lab %d,(%.1f examples/sec;%.3f sec/batch)')
+                    # print(format_str % (step,acc,loss_out,pre_out,lab_out,examples_per_sec_out,sec_per_batch_out))
+# builder = tf.saved_model.builder.SavedModelBuilder("./fuck")
 
 #
 # num_examples = 10000
